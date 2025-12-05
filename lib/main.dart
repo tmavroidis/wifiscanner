@@ -19,6 +19,8 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
+      darkTheme: ThemeData.dark(),
+      themeMode: ThemeMode.dark,
       home: const WiFiScannerPage(),
     );
   }
@@ -123,7 +125,7 @@ class RadarPainter extends CustomPainter {
       final textPainter = TextPainter(
         text: TextSpan(
           text: ap.ssid,
-          style: const TextStyle(color: Colors.black, fontSize: 12),
+          style: const TextStyle(color: Colors.white, fontSize: 12),
         ),
         textDirection: TextDirection.ltr,
       );
