@@ -1,16 +1,13 @@
 # wifiscanner
 
-wifi scanner
+Scan wifi and return what is found
+Gemini 
 
-## Getting Started
+->Intial prompt
+starting fresh lets create an app that scans the wifi signals in your location, creates a visual represention of the signals in your area simillar to radar, labels the dots with their ssid, comparitively making the dots larger when the wifi signal is stronger
 
-This project is a starting point for a Flutter application.
+feed errors back to gemini until you get a clean compile
 
-A few resources to get you started if this is your first Flutter project:
+=>Prompt: change the app to dark mode
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
