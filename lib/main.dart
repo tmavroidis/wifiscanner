@@ -38,6 +38,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   StreamSubscription<List<WiFiAccessPoint>>? _subscription;
   late AnimationController _animationController;
   final TransformationController _transformationController = TransformationController();
+  double _sensitivityValue = -100.0;
 
   @override
   void initState() {
@@ -80,11 +81,11 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     });
   }
 
-  void _handleTap(Offset tapPosition, Size size) {
+  void _handleTap(Offset tapPosition, Size size, List<WiFiAccessPoint> accessPoints) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width, size.height) / 2;
 
-    for (final ap in _accessPoints) {
+    for (final ap in accessPoints) {
       final signalStrength = (ap.level + 100).clamp(0, 100) / 100.0;
       final baseDotRadius = 2 + (signalStrength * 8);
 
@@ -150,31 +151,59 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = Size(constraints.maxWidth, constraints.maxHeight);
-          return GestureDetector(
-            onTapUp: (details) {
-              final sceneOffset = _transformationController.toScene(details.localPosition);
-              _handleTap(sceneOffset, size);
-            },
-            child: InteractiveViewer(
-              transformationController: _transformationController,
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: AnimatedBuilder(
-                animation: _animationController,
-                builder: (context, child) {
-                  return CustomPaint(
-                    size: size,
-                    painter: RadarPainter(_accessPoints, _animationController.value),
-                    child: Container(),
-                  );
-                },
-              ),
+      body: Column(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final size = Size(constraints.maxWidth, constraints.maxHeight);
+                final filteredAccessPoints = _accessPoints.where((ap) => ap.level >= _sensitivityValue).toList();
+                return GestureDetector(
+                  onTapUp: (details) {
+                    final sceneOffset = _transformationController.toScene(details.localPosition);
+                    _handleTap(sceneOffset, size, filteredAccessPoints);
+                  },
+                  child: InteractiveViewer(
+                    transformationController: _transformationController,
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: AnimatedBuilder(
+                      animation: _animationController,
+                      builder: (context, child) {
+                        return CustomPaint(
+                          size: size,
+                          painter: RadarPainter(filteredAccessPoints, _animationController.value),
+                          child: Container(),
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Filter by Signal Strength: ${_sensitivityValue.toInt()} dBm'),
+                Slider(
+                  value: _sensitivityValue,
+                  min: -100,
+                  max: -30,
+                  divisions: 70,
+                  label: '${_sensitivityValue.toInt()} dBm',
+                  onChanged: (value) {
+                    setState(() {
+                      _sensitivityValue = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+          )
+        ],
       ),
     );
   }
