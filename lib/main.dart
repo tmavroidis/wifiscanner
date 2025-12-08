@@ -33,13 +33,18 @@ class WiFiScannerPage extends StatefulWidget {
   State<WiFiScannerPage> createState() => _WiFiScannerPageState();
 }
 
-class _WiFiScannerPageState extends State<WiFiScannerPage> {
+class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProviderStateMixin {
   List<WiFiAccessPoint> _accessPoints = <WiFiAccessPoint>[];
   StreamSubscription<List<WiFiAccessPoint>>? _subscription;
+  late AnimationController _animationController;
 
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat();
     _startScan();
     _listenToScannedResults();
   }
@@ -47,6 +52,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> {
   @override
   void dispose() {
     _subscription?.cancel();
+    _animationController.dispose();
     super.dispose();
   }
 
@@ -78,9 +84,14 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> {
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
       ),
-      body: CustomPaint(
-        painter: RadarPainter(_accessPoints),
-        child: Container(),
+      body: AnimatedBuilder(
+        animation: _animationController,
+        builder: (context, child) {
+          return CustomPaint(
+            painter: RadarPainter(_accessPoints, _animationController.value),
+            child: Container(),
+          );
+        },
       ),
     );
   }
@@ -88,8 +99,9 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> {
 
 class RadarPainter extends CustomPainter {
   final List<WiFiAccessPoint> accessPoints;
+  final double rotation;
 
-  RadarPainter(this.accessPoints);
+  RadarPainter(this.accessPoints, this.rotation);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -106,18 +118,40 @@ class RadarPainter extends CustomPainter {
     canvas.drawCircle(center, radius * 0.5, paint);
     canvas.drawCircle(center, radius * 0.25, paint);
 
+    final rotationAngle = rotation * 2 * pi;
+    final armPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.5)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(
+      Path()
+        ..moveTo(center.dx, center.dy)
+        ..arcTo(Rect.fromCircle(center: center, radius: radius), rotationAngle - pi / 4, pi / 4, false)
+        ..close(),
+      armPaint,
+    );
+
     for (var ap in accessPoints) {
       // Normalize signal strength to a value between 0 and 1
       final signalStrength = (ap.level + 100).clamp(0, 100) / 100.0;
-      final dotRadius = 2 + (signalStrength * 8);
+      final baseDotRadius = 2 + (signalStrength * 8);
 
       // Distribute points randomly within the circle
-      final random = Random();
+      final random = Random(ap.bssid.hashCode);
       final r = radius * sqrt(random.nextDouble());
       final theta = random.nextDouble() * 2 * pi;
       final x = center.dx + r * cos(theta);
       final y = center.dy + r * sin(theta);
       final dotCenter = Offset(x, y);
+
+      double angleDiff = (theta - rotationAngle) % (2 * pi);
+      if (angleDiff < 0) angleDiff += 2 * pi;
+
+      double expansion = 0;
+      if (angleDiff > 0 && angleDiff < pi / 4) {
+        expansion = sin(angleDiff * 4) * 3;
+      }
+
+      final dotRadius = baseDotRadius + expansion;
 
       final dotPaint = Paint()..color = Colors.red;
       canvas.drawCircle(dotCenter, dotRadius, dotPaint);
@@ -135,7 +169,7 @@ class RadarPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return true;
+  bool shouldRepaint(covariant RadarPainter oldDelegate) {
+    return accessPoints != oldDelegate.accessPoints || rotation != oldDelegate.rotation;
   }
 }
