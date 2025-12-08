@@ -37,6 +37,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   List<WiFiAccessPoint> _accessPoints = <WiFiAccessPoint>[];
   StreamSubscription<List<WiFiAccessPoint>>? _subscription;
   late AnimationController _animationController;
+  final TransformationController _transformationController = TransformationController();
 
   @override
   void initState() {
@@ -53,6 +54,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   void dispose() {
     _subscription?.cancel();
     _animationController.dispose();
+    _transformationController.dispose();
     super.dispose();
   }
 
@@ -95,13 +97,10 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
 
       final rotationAngle = _animationController.value * 2 * pi;
       
-      // Calculate the angle of the dot relative to the arm's *leading* edge.
       double angleDiff = (rotationAngle - theta) % (2 * pi);
       if (angleDiff < 0) angleDiff += 2 * pi;
 
       double expansion = 0;
-      // The arm itself covers the angle difference from 0 to pi/4.
-      // The expansion happens in the "wake" of the arm.
       const armWidth = pi / 4;
       if (angleDiff > armWidth && angleDiff < 2 * armWidth) {
         final normalizedAngle = (angleDiff - armWidth) / armWidth * pi;
@@ -155,16 +154,24 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
         builder: (context, constraints) {
           final size = Size(constraints.maxWidth, constraints.maxHeight);
           return GestureDetector(
-            onTapUp: (details) => _handleTap(details.localPosition, size),
-            child: AnimatedBuilder(
-              animation: _animationController,
-              builder: (context, child) {
-                return CustomPaint(
-                  size: size,
-                  painter: RadarPainter(_accessPoints, _animationController.value),
-                  child: Container(),
-                );
-              },
+            onTapUp: (details) {
+              final sceneOffset = _transformationController.toScene(details.localPosition);
+              _handleTap(sceneOffset, size);
+            },
+            child: InteractiveViewer(
+              transformationController: _transformationController,
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: AnimatedBuilder(
+                animation: _animationController,
+                builder: (context, child) {
+                  return CustomPaint(
+                    size: size,
+                    painter: RadarPainter(_accessPoints, _animationController.value),
+                    child: Container(),
+                  );
+                },
+              ),
             ),
           );
         },
@@ -219,17 +226,12 @@ class RadarPainter extends CustomPainter {
       final y = center.dy + r * sin(theta);
       final dotCenter = Offset(x, y);
 
-      // Calculate the angle of the dot relative to the arm's *leading* edge.
       double angleDiff = (rotationAngle - theta) % (2 * pi);
       if (angleDiff < 0) angleDiff += 2 * pi;
 
       double expansion = 0;
-      // The arm itself covers the angle difference from 0 to pi/4.
-      // We want the expansion to happen *after* the arm, in its wake.
       const armWidth = pi / 4;
       if (angleDiff > armWidth && angleDiff < 2 * armWidth) {
-        // Normalize the angle in the wake to a 0-pi range for the sine function,
-        // creating a pulse effect.
         final normalizedAngle = (angleDiff - armWidth) / armWidth * pi;
         expansion = sin(normalizedAngle) * 3;
       }
