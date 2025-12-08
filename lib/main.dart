@@ -78,18 +78,94 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     });
   }
 
+  void _handleTap(Offset tapPosition, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = min(size.width, size.height) / 2;
+
+    for (final ap in _accessPoints) {
+      final signalStrength = (ap.level + 100).clamp(0, 100) / 100.0;
+      final baseDotRadius = 2 + (signalStrength * 8);
+
+      final random = Random(ap.bssid.hashCode);
+      final r = radius * sqrt(random.nextDouble());
+      final theta = random.nextDouble() * 2 * pi;
+      final x = center.dx + r * cos(theta);
+      final y = center.dy + r * sin(theta);
+      final dotCenter = Offset(x, y);
+
+      final rotationAngle = _animationController.value * 2 * pi;
+      
+      // Calculate the angle of the dot relative to the arm's *leading* edge.
+      double angleDiff = (rotationAngle - theta) % (2 * pi);
+      if (angleDiff < 0) angleDiff += 2 * pi;
+
+      double expansion = 0;
+      // The arm itself covers the angle difference from 0 to pi/4.
+      // The expansion happens in the "wake" of the arm.
+      const armWidth = pi / 4;
+      if (angleDiff > armWidth && angleDiff < 2 * armWidth) {
+        final normalizedAngle = (angleDiff - armWidth) / armWidth * pi;
+        expansion = sin(normalizedAngle) * 3;
+      }
+      final dotRadius = baseDotRadius + expansion;
+
+      if ((tapPosition - dotCenter).distance <= dotRadius) {
+        _showAccessPointDetails(ap);
+        return; 
+      }
+    }
+  }
+
+  void _showAccessPointDetails(WiFiAccessPoint ap) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(ap.ssid.isNotEmpty ? ap.ssid : "Hidden Network"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("BSSID: ${ap.bssid}"),
+            Text("Signal Strength: ${ap.level} dBm"),
+            Text("Frequency: ${ap.frequency} MHz"),
+            Text("Channel Width: ${ap.channelWidth?.toString() ?? 'N/A'}"),
+            Text("Standard: ${ap.standard?.toString() ?? 'N/A'}"),
+            Text("Timestamp: ${DateTime.fromMillisecondsSinceEpoch(ap.timestamp!)}"),
+            if (ap.isPasspoint ?? false) const Text("Passpoint: Yes"),
+            if (ap.is80211mcResponder ?? false) const Text("802.11mc Responder: Yes"),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("Close"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
       ),
-      body: AnimatedBuilder(
-        animation: _animationController,
-        builder: (context, child) {
-          return CustomPaint(
-            painter: RadarPainter(_accessPoints, _animationController.value),
-            child: Container(),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+          return GestureDetector(
+            onTapUp: (details) => _handleTap(details.localPosition, size),
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                return CustomPaint(
+                  size: size,
+                  painter: RadarPainter(_accessPoints, _animationController.value),
+                  child: Container(),
+                );
+              },
+            ),
           );
         },
       ),
@@ -143,12 +219,19 @@ class RadarPainter extends CustomPainter {
       final y = center.dy + r * sin(theta);
       final dotCenter = Offset(x, y);
 
-      double angleDiff = (theta - rotationAngle) % (2 * pi);
+      // Calculate the angle of the dot relative to the arm's *leading* edge.
+      double angleDiff = (rotationAngle - theta) % (2 * pi);
       if (angleDiff < 0) angleDiff += 2 * pi;
 
       double expansion = 0;
-      if (angleDiff > 0 && angleDiff < pi / 4) {
-        expansion = sin(angleDiff * 4) * 3;
+      // The arm itself covers the angle difference from 0 to pi/4.
+      // We want the expansion to happen *after* the arm, in its wake.
+      const armWidth = pi / 4;
+      if (angleDiff > armWidth && angleDiff < 2 * armWidth) {
+        // Normalize the angle in the wake to a 0-pi range for the sine function,
+        // creating a pulse effect.
+        final normalizedAngle = (angleDiff - armWidth) / armWidth * pi;
+        expansion = sin(normalizedAngle) * 3;
       }
 
       final dotRadius = baseDotRadius + expansion;
