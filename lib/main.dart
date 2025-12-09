@@ -185,19 +185,25 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
         title: const Text('WiFi Scanner'),
         actions: [
           if (!_isUnsupportedPlatform)
-            IconButton(
-              icon: Icon(_isRotationPaused ? Icons.play_arrow : Icons.pause),
-              onPressed: () {
-                setState(() {
-                  _isRotationPaused = !_isRotationPaused;
-                  if (_isRotationPaused) {
-                    _animationController.stop();
-                  } else {
-                    _animationController.repeat();
-                  }
-                });
-              },
-            ),
+            Row(
+              children: [
+                const Text("Scan"),
+                Switch(
+                  value: !_isRotationPaused,
+                  onChanged: (value) {
+                    setState(() {
+                      _isRotationPaused = !value;
+                      if (_isRotationPaused) {
+                        _animationController.stop();
+                      } else {
+                        _animationController.repeat();
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(width: 16),
+              ],
+            )
         ],
       ),
       body: _isUnsupportedPlatform
