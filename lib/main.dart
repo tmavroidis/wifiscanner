@@ -87,6 +87,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   late AnimationController _animationController;
   final TransformationController _transformationController = TransformationController();
   double _sensitivityValue = -100.0;
+  bool _isRotationPaused = false;
 
   @override
   void initState() {
@@ -158,40 +159,12 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
       final dotRadius = baseDotRadius + expansion;
 
       if ((tapPosition - dotCenter).distance <= dotRadius) {
-        _showAccessPointDetails(ap);
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (context) => SignalLocatorPage(accessPoint: ap),
+        ));
         return; 
       }
     }
-  }
-
-  void _showAccessPointDetails(WiFiAccessPoint ap) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(ap.ssid.isNotEmpty ? ap.ssid : ap.bssid),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("BSSID: ${ap.bssid}"),
-            Text("Manufacturer: ${_getManufacturer(ap.bssid)}"),
-            Text("Signal Strength: ${ap.level} dBm"),
-            Text("Frequency: ${ap.frequency} MHz"),
-            Text("Channel Width: ${ap.channelWidth?.toString() ?? 'N/A'}"),
-            Text("Standard: ${ap.standard?.toString() ?? 'N/A'}"),
-            Text("Timestamp: ${DateTime.fromMillisecondsSinceEpoch(ap.timestamp!)}"),
-            if (ap.isPasspoint ?? false) const Text("Passpoint: Yes"),
-            if (ap.is80211mcResponder ?? false) const Text("802.11mc Responder: Yes"),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text("Close"),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -199,6 +172,21 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     return Scaffold(
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
+        actions: [
+          IconButton(
+            icon: Icon(_isRotationPaused ? Icons.play_arrow : Icons.pause),
+            onPressed: () {
+              setState(() {
+                _isRotationPaused = !_isRotationPaused;
+                if (_isRotationPaused) {
+                  _animationController.stop();
+                } else {
+                  _animationController.repeat();
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -221,7 +209,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
                       builder: (context, child) {
                         return CustomPaint(
                           size: size,
-                          painter: RadarPainter(filteredAccessPoints, _animationController.value),
+                          painter: RadarPainter(filteredAccessPoints, _animationController.value, isPaused: _isRotationPaused),
                           child: Container(),
                         );
                       },
@@ -261,8 +249,9 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
 class RadarPainter extends CustomPainter {
   final List<WiFiAccessPoint> accessPoints;
   final double rotation;
+  final bool isPaused;
 
-  RadarPainter(this.accessPoints, this.rotation);
+  RadarPainter(this.accessPoints, this.rotation, {this.isPaused = false});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -283,13 +272,16 @@ class RadarPainter extends CustomPainter {
     final armPaint = Paint()
       ..color = Colors.blue.withOpacity(0.5)
       ..style = PaintingStyle.fill;
-    canvas.drawPath(
-      Path()
-        ..moveTo(center.dx, center.dy)
-        ..arcTo(Rect.fromCircle(center: center, radius: radius), rotationAngle - pi / 4, pi / 4, false)
-        ..close(),
-      armPaint,
-    );
+    
+    if (!isPaused) {
+      canvas.drawPath(
+        Path()
+          ..moveTo(center.dx, center.dy)
+          ..arcTo(Rect.fromCircle(center: center, radius: radius), rotationAngle - pi / 4, pi / 4, false)
+          ..close(),
+        armPaint,
+      );
+    }
 
     for (var ap in accessPoints) {
       // Normalize signal strength to a value between 0 and 1
@@ -308,10 +300,12 @@ class RadarPainter extends CustomPainter {
       if (angleDiff < 0) angleDiff += 2 * pi;
 
       double expansion = 0;
-      const armWidth = pi / 4;
-      if (angleDiff > armWidth && angleDiff < 2 * armWidth) {
-        final normalizedAngle = (angleDiff - armWidth) / armWidth * pi;
-        expansion = sin(normalizedAngle) * 3;
+      if (!isPaused) {
+        const armWidth = pi / 4;
+        if (angleDiff > armWidth && angleDiff < 2 * armWidth) {
+          final normalizedAngle = (angleDiff - armWidth) / armWidth * pi;
+          expansion = sin(normalizedAngle) * 3;
+        }
       }
 
       final dotRadius = baseDotRadius + expansion;
@@ -339,6 +333,154 @@ class RadarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant RadarPainter oldDelegate) {
-    return accessPoints != oldDelegate.accessPoints || rotation != oldDelegate.rotation;
+    return accessPoints != oldDelegate.accessPoints || rotation != oldDelegate.rotation || isPaused != oldDelegate.isPaused;
+  }
+}
+
+class SignalLocatorPage extends StatefulWidget {
+  final WiFiAccessPoint accessPoint;
+  const SignalLocatorPage({super.key, required this.accessPoint});
+
+  @override
+  State<SignalLocatorPage> createState() => _SignalLocatorPageState();
+}
+
+class _SignalLocatorPageState extends State<SignalLocatorPage> {
+  late WiFiAccessPoint _accessPoint;
+  StreamSubscription<List<WiFiAccessPoint>>? _subscription;
+  Timer? _scanTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _accessPoint = widget.accessPoint;
+    _startPeriodicScan();
+    _listenForUpdates();
+  }
+
+  void _startPeriodicScan() {
+    _scanTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      final canScan = await WiFiScan.instance.canStartScan(askPermissions: false);
+      if (canScan != CanStartScan.yes) {
+        return;
+      }
+      await WiFiScan.instance.startScan();
+    });
+  }
+
+  void _listenForUpdates() {
+    _subscription = WiFiScan.instance.onScannedResultsAvailable.listen(
+      (results) {
+        try {
+          final updatedAp = results.firstWhere((ap) => ap.bssid == _accessPoint.bssid);
+          if (mounted) {
+            setState(() {
+              _accessPoint = updatedAp;
+            });
+          }
+        } catch (e) {
+          // AP is no longer in range, do nothing and keep last known value
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _scanTimer?.cancel();
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_accessPoint.ssid.isNotEmpty ? _accessPoint.ssid : _accessPoint.bssid),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Expanded(
+              flex: 3,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 500),
+                child: CustomPaint(
+                  painter: SignalLocatorPainter(level: _accessPoint.level),
+                  child: const Center(),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Text(
+                        '${_accessPoint.level} dBm',
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text("BSSID: ${_accessPoint.bssid}"),
+                    Text("Manufacturer: ${_getManufacturer(_accessPoint.bssid)}"),
+                    Text("Frequency: ${_accessPoint.frequency} MHz"),
+                    Text("Channel Width: ${_accessPoint.channelWidth?.toString() ?? 'N/A'}"),
+                    Text("Standard: ${_accessPoint.standard.toString().split('.').last}"),
+                    Text("Timestamp: ${DateTime.fromMillisecondsSinceEpoch(_accessPoint.timestamp!)}"),
+                    if (_accessPoint.isPasspoint ?? false) const Text("Passpoint: Yes"),
+                    if (_accessPoint.is80211mcResponder ?? false) const Text("802.11mc Responder: Yes"),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SignalLocatorPainter extends CustomPainter {
+  final int level;
+
+  SignalLocatorPainter({required this.level});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxRadius = min(size.width, size.height) / 2.5;
+
+    final backgroundPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.1)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+    canvas.drawCircle(center, maxRadius, backgroundPaint);
+    canvas.drawCircle(center, maxRadius * 0.75, backgroundPaint);
+    canvas.drawCircle(center, maxRadius * 0.5, backgroundPaint);
+    canvas.drawCircle(center, maxRadius * 0.25, backgroundPaint);
+
+    // Normalize level from -100 to -30 dBm
+    final normalizedLevel = (level.clamp(-100, -30) + 100) / 70.0;
+
+    // Radius shrinks as signal gets stronger (normalizedLevel -> 1.0)
+    final radius = (1.0 - normalizedLevel) * maxRadius;
+    final strokeWidth = 10 + (normalizedLevel * 40);
+
+    final signalPaint = Paint()
+      ..color = Color.lerp(Colors.red, Colors.green, normalizedLevel)!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, signalPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant SignalLocatorPainter oldDelegate) {
+    return oldDelegate.level != level;
   }
 }
