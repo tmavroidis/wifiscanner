@@ -5,6 +5,54 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
+/// A small lookup table for Organizationally Unique Identifiers (OUIs) to manufacturer names.
+/// This is not an exhaustive list.
+const Map<String, String> _ouiToManufacturer = {
+  // Google
+  '00:1a:11': 'Google',
+  '3c:5a:b4': 'Google',
+  'f8:8f:ca': 'Google',
+  // TP-Link
+  '14:cf:92': 'TP-Link',
+  'c0:4a:00': 'TP-Link',
+  // Netgear
+  '00:0f:b5': 'Netgear',
+  '08:02:8e': 'Netgear',
+  // ASUS
+  '08:60:6e': 'ASUS',
+  'bc:ee:7b': 'ASUS',
+  // Ubiquiti
+  '04:18:d6': 'Ubiquiti',
+  '24:a4:3c': 'Ubiquiti',
+  'fc:ec:da': 'Ubiquiti',
+  // Cisco Meraki
+  '88:15:44': 'Meraki',
+  'e0:55:3d': 'Meraki',
+  // Cisco
+  '00:40:96': 'Cisco',
+  // Apple
+  '70:ca:9b': 'Apple',
+  '88:6b:6e': 'Apple',
+  'a8:86:dd': 'Apple',
+  // Samsung
+  '00:16:32': 'Samsung',
+  '00:1d:c9': 'Samsung',
+  // Intel
+  '00:1c:c0': 'Intel',
+  '9c:d2:1e': 'Intel',
+  // Linksys
+  '00:25:9c': 'Linksys',
+  'c8:d7:19': 'Linksys',
+};
+
+String _getManufacturer(String bssid) {
+  if (bssid.length >= 8) {
+    final oui = bssid.substring(0, 8).toLowerCase();
+    return _ouiToManufacturer[oui] ?? 'Unknown';
+  }
+  return 'Unknown';
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -120,12 +168,13 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(ap.ssid.isNotEmpty ? ap.ssid : "Hidden Network"),
+        title: Text(ap.ssid.isNotEmpty ? ap.ssid : ap.bssid),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text("BSSID: ${ap.bssid}"),
+            Text("Manufacturer: ${_getManufacturer(ap.bssid)}"),
             Text("Signal Strength: ${ap.level} dBm"),
             Text("Frequency: ${ap.frequency} MHz"),
             Text("Channel Width: ${ap.channelWidth?.toString() ?? 'N/A'}"),
@@ -270,9 +319,15 @@ class RadarPainter extends CustomPainter {
       final dotPaint = Paint()..color = Colors.red;
       canvas.drawCircle(dotCenter, dotRadius, dotPaint);
 
+      String label = ap.ssid;
+      if (label.isEmpty) {
+        final manufacturer = _getManufacturer(ap.bssid);
+        label = manufacturer != 'Unknown' ? manufacturer : ap.bssid;
+      }
+
       final textPainter = TextPainter(
         text: TextSpan(
-          text: ap.ssid,
+          text: label,
           style: const TextStyle(color: Colors.white, fontSize: 12),
         ),
         textDirection: TextDirection.ltr,
