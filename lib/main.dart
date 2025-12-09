@@ -54,6 +54,29 @@ String _getManufacturer(String bssid) {
   return 'Unknown';
 }
 
+String _getSignalStrengthDescription(int level) {
+  if (level >= -60) {
+    return 'Excellent';
+  }
+  if (level >= -70) {
+    return 'Good';
+  }
+  if (level >= -80) {
+    return 'Fair';
+  }
+  return 'Poor';
+}
+
+Color _getSignalStrengthColor(int level) {
+  if (level >= -70) {
+    return Colors.green;
+  }
+  if (level >= -80) {
+    return Colors.yellow;
+  }
+  return Colors.red;
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -339,7 +362,7 @@ class RadarPainter extends CustomPainter {
 
       final dotRadius = baseDotRadius + expansion;
 
-      final dotPaint = Paint()..color = Colors.red;
+      final dotPaint = Paint()..color = _getSignalStrengthColor(ap.level);
       canvas.drawCircle(dotCenter, dotRadius, dotPaint);
 
       String label = ap.ssid;
@@ -448,9 +471,18 @@ class _SignalLocatorPageState extends State<SignalLocatorPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Center(
-                      child: Text(
-                        '${_accessPoint.level} dBm',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                      child: Column(
+                        children: [
+                          Text(
+                            '${_accessPoint.level} dBm',
+                            style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _getSignalStrengthDescription(_accessPoint.level),
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 24),
