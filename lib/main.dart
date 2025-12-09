@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
@@ -88,16 +89,26 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   final TransformationController _transformationController = TransformationController();
   double _sensitivityValue = -100.0;
   bool _isRotationPaused = false;
+  bool _isUnsupportedPlatform = false;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 5),
-    )..repeat();
-    _startScan();
-    _listenToScannedResults();
+    final platform = defaultTargetPlatform;
+    if (platform == TargetPlatform.android || platform == TargetPlatform.iOS) {
+      _animationController = AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 5),
+      )..repeat();
+      _startScan();
+      _listenToScannedResults();
+    } else {
+      _isUnsupportedPlatform = true;
+      _animationController = AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 5),
+      ); // Initialized but not started
+    }
   }
 
   @override
@@ -173,75 +184,87 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
         actions: [
-          IconButton(
-            icon: Icon(_isRotationPaused ? Icons.play_arrow : Icons.pause),
-            onPressed: () {
-              setState(() {
-                _isRotationPaused = !_isRotationPaused;
-                if (_isRotationPaused) {
-                  _animationController.stop();
-                } else {
-                  _animationController.repeat();
-                }
-              });
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final size = Size(constraints.maxWidth, constraints.maxHeight);
-                final filteredAccessPoints = _accessPoints.where((ap) => ap.level >= _sensitivityValue).toList();
-                return GestureDetector(
-                  onTapUp: (details) {
-                    final sceneOffset = _transformationController.toScene(details.localPosition);
-                    _handleTap(sceneOffset, size, filteredAccessPoints);
-                  },
-                  child: InteractiveViewer(
-                    transformationController: _transformationController,
-                    minScale: 0.5,
-                    maxScale: 4.0,
-                    child: AnimatedBuilder(
-                      animation: _animationController,
-                      builder: (context, child) {
-                        return CustomPaint(
-                          size: size,
-                          painter: RadarPainter(filteredAccessPoints, _animationController.value, isPaused: _isRotationPaused),
-                          child: Container(),
-                        );
-                      },
-                    ),
-                  ),
-                );
+          if (!_isUnsupportedPlatform)
+            IconButton(
+              icon: Icon(_isRotationPaused ? Icons.play_arrow : Icons.pause),
+              onPressed: () {
+                setState(() {
+                  _isRotationPaused = !_isRotationPaused;
+                  if (_isRotationPaused) {
+                    _animationController.stop();
+                  } else {
+                    _animationController.repeat();
+                  }
+                });
               },
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Filter by Signal Strength: ${_sensitivityValue.toInt()} dBm'),
-                Slider(
-                  value: _sensitivityValue,
-                  min: -100,
-                  max: -30,
-                  divisions: 70,
-                  label: '${_sensitivityValue.toInt()} dBm',
-                  onChanged: (value) {
-                    setState(() {
-                      _sensitivityValue = value;
-                    });
-                  },
-                ),
-              ],
-            ),
-          )
         ],
       ),
+      body: _isUnsupportedPlatform
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24.0),
+                child: Text(
+                  'WiFi scanning is only available on Android and iOS devices.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 18),
+                ),
+              ),
+            )
+          : Column(
+              children: [
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final size = Size(constraints.maxWidth, constraints.maxHeight);
+                      final filteredAccessPoints = _accessPoints.where((ap) => ap.level >= _sensitivityValue).toList();
+                      return GestureDetector(
+                        onTapUp: (details) {
+                          final sceneOffset = _transformationController.toScene(details.localPosition);
+                          _handleTap(sceneOffset, size, filteredAccessPoints);
+                        },
+                        child: InteractiveViewer(
+                          transformationController: _transformationController,
+                          minScale: 0.5,
+                          maxScale: 4.0,
+                          child: AnimatedBuilder(
+                            animation: _animationController,
+                            builder: (context, child) {
+                              return CustomPaint(
+                                size: size,
+                                painter: RadarPainter(filteredAccessPoints, _animationController.value, isPaused: _isRotationPaused),
+                                child: Container(),
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Filter by Signal Strength: ${_sensitivityValue.toInt()} dBm'),
+                      Slider(
+                        value: _sensitivityValue,
+                        min: -100,
+                        max: -30,
+                        divisions: 70,
+                        label: '${_sensitivityValue.toInt()} dBm',
+                        onChanged: (value) {
+                          setState(() {
+                            _sensitivityValue = value;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                )
+              ],
+            ),
     );
   }
 }
