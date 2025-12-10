@@ -181,6 +181,11 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     _subscription = WiFiScan.instance.onScannedResultsAvailable.listen((results) {
       if (mounted) {
         final currentBssids = results.map((ap) => ap.bssid).toSet();
+        for (final ap in results) {
+          if (!_listedDevices.containsKey(ap.bssid)) {
+            _showNewDevicePopup(ap);
+          }
+        }
         setState(() {
           _accessPoints = results;
 
@@ -198,6 +203,48 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
         });
       }
     });
+  }
+
+  void _showNewDevicePopup(WiFiAccessPoint ap) {
+    // Close any existing dialog first
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        // Automatically close the dialog after 15 seconds
+        Timer(const Duration(seconds: 15), () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        });
+
+        return AlertDialog(
+          title: const Text('New Signal Detected'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("SSID: ${ap.ssid.isNotEmpty ? ap.ssid : 'N/A'}"),
+              Text("BSSID: ${ap.bssid}"),
+              Text("Strength: ${ap.level} dBm"),
+              Text("Manufacturer: ${_getManufacturer(ap.bssid)}"),
+              Text("Frequency: ${ap.frequency} MHz"),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _handleTap(Offset tapPosition, Size size, List<WiFiAccessPoint> accessPoints) {
@@ -254,44 +301,41 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
         actions: [
-          if (!_isUnsupportedPlatform)
-            Row(
-              children: [
-                const Text("Scan"),
-                Switch(
-                  value: !_isRotationPaused,
-                  onChanged: (value) {
-                    setState(() {
-                      _isRotationPaused = !value;
-                      if (_isRotationPaused) {
-                        _animationController.stop();
-                      } else {
-                        _animationController.repeat();
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(width: 8),
-                const Text("List"),
-                Switch(
-                  value: _isListVisible,
-                  onChanged: (value) {
-                    setState(() {
-                      _isListVisible = value;
-                    });
-                  },
-                ),
-              ],
-            ),
           PopupMenuButton<String>(
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'about') {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (context) => const AboutPage(),
                 ));
+              } else if (value == 'settings') {
+                final settings = await Navigator.of(context).push<Map<String, bool>>(
+                  MaterialPageRoute(
+                    builder: (context) => SettingsPage(
+                      isScanPaused: _isRotationPaused,
+                      isListVisible: _isListVisible,
+                    ),
+                  ),
+                );
+
+                if (settings != null) {
+                  setState(() {
+                    _isRotationPaused = settings['isScanPaused'] ?? _isRotationPaused;
+                    _isListVisible = settings['isListVisible'] ?? _isListVisible;
+
+                    if (_isRotationPaused) {
+                      _animationController.stop();
+                    } else {
+                      _animationController.repeat();
+                    }
+                  });
+                }
               }
             },
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'settings',
+                child: Text('Settings'),
+              ),
               const PopupMenuItem<String>(
                 value: 'about',
                 child: Text('About'),
@@ -401,6 +445,81 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
                 ),
               ],
             ),
+    );
+  }
+}
+
+class SettingsPage extends StatefulWidget {
+  final bool isScanPaused;
+  final bool isListVisible;
+
+  const SettingsPage({super.key, required this.isScanPaused, required this.isListVisible});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late bool _isScanPaused;
+  late bool _isListVisible;
+
+  @override
+  void initState() {
+    super.initState();
+    _isScanPaused = widget.isScanPaused;
+    _isListVisible = widget.isListVisible;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings'),
+        leading: BackButton(
+          onPressed: () {
+            Navigator.of(context).pop({
+              'isScanPaused': _isScanPaused,
+              'isListVisible': _isListVisible,
+            });
+          },
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Pause Scan'),
+                Switch(
+                  value: _isScanPaused,
+                  onChanged: (value) {
+                    setState(() {
+                      _isScanPaused = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Show List'),
+                Switch(
+                  value: _isListVisible,
+                  onChanged: (value) {
+                    setState(() {
+                      _isListVisible = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -662,26 +781,26 @@ class AboutPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('About'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
+      body: const Padding(
+        padding: EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Text(
+            Text(
               'WiFi Scanner',
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 24),
-            const Text('Released under a GPL-3.0 licence:'),
-            const SizedBox(height: 8),
-            const SelectableText(
+            SizedBox(height: 24),
+            Text('Released under a GPL-3.0 licence:'),
+            SizedBox(height: 8),
+            SelectableText(
               'https://github.com/tmavroidis/wifiscanner?tab=GPL-3.0-1-ov-file#',
               style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
             ),
-            const SizedBox(height: 24),
-            const Text('Source available at:'),
-            const SizedBox(height: 8),
-            const SelectableText(
+            SizedBox(height: 24),
+            Text('Source available at:'),
+            SizedBox(height: 8),
+            SelectableText(
               'https://github.com/tmavroidis/wifiscanner/tree/master',
               style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
             ),
