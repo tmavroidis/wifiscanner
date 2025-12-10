@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
 /// A small lookup table for Organizationally Unique Identifiers (OUIs) to manufacturer names.
@@ -78,7 +79,15 @@ Color _getSignalStrengthColor(int level) {
 }
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]).then((_) {
+    runApp(const MyApp());
+  });
 }
 
 class MyApp extends StatelessWidget {
@@ -113,6 +122,12 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   double _sensitivityValue = -100.0;
   bool _isRotationPaused = false;
   bool _isUnsupportedPlatform = false;
+  bool _isListVisible = true;
+
+  // State for the new device list
+  final Map<String, WiFiAccessPoint> _listedDevices = {};
+  final Map<String, DateTime> _firstSeenTimestamps = {};
+  Timer? _colorUpdateTimer;
 
   @override
   void initState() {
@@ -125,6 +140,13 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
       )..repeat();
       _startScan();
       _listenToScannedResults();
+
+      // Timer to update the colors of the device list
+      _colorUpdateTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
     } else {
       _isUnsupportedPlatform = true;
       _animationController = AnimationController(
@@ -139,6 +161,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     _subscription?.cancel();
     _animationController.dispose();
     _transformationController.dispose();
+    _colorUpdateTimer?.cancel();
     super.dispose();
   }
 
@@ -157,8 +180,21 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     }
     _subscription = WiFiScan.instance.onScannedResultsAvailable.listen((results) {
       if (mounted) {
+        final currentBssids = results.map((ap) => ap.bssid).toSet();
         setState(() {
           _accessPoints = results;
+
+          // Remove devices from our list that are no longer visible
+          _listedDevices.removeWhere((bssid, _) => !currentBssids.contains(bssid));
+          _firstSeenTimestamps.removeWhere((bssid, _) => !currentBssids.contains(bssid));
+
+          // Add new devices to our list
+          for (final ap in results) {
+            if (!_listedDevices.containsKey(ap.bssid)) {
+              _listedDevices[ap.bssid] = ap;
+              _firstSeenTimestamps[ap.bssid] = DateTime.now();
+            }
+          }
         });
       }
     });
@@ -201,6 +237,17 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
     }
   }
 
+  Color _getDeviceColor(DateTime discoveryTime) {
+    final duration = DateTime.now().difference(discoveryTime);
+    if (duration.inMinutes < 1) {
+      return Colors.red;
+    } else if (duration.inMinutes < 2) {
+      return Colors.yellow;
+    } else {
+      return Colors.green;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -224,9 +271,33 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
                     });
                   },
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 8),
+                const Text("List"),
+                Switch(
+                  value: _isListVisible,
+                  onChanged: (value) {
+                    setState(() {
+                      _isListVisible = value;
+                    });
+                  },
+                ),
               ],
-            )
+            ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'about') {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (context) => const AboutPage(),
+                ));
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'about',
+                child: Text('About'),
+              ),
+            ],
+          ),
         ],
       ),
       body: _isUnsupportedPlatform
@@ -240,58 +311,94 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
                 ),
               ),
             )
-          : Column(
+          : Row(
               children: [
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final size = Size(constraints.maxWidth, constraints.maxHeight);
-                      final filteredAccessPoints = _accessPoints.where((ap) => ap.level >= _sensitivityValue).toList();
-                      return GestureDetector(
-                        onTapUp: (details) {
-                          final sceneOffset = _transformationController.toScene(details.localPosition);
-                          _handleTap(sceneOffset, size, filteredAccessPoints);
-                        },
-                        child: InteractiveViewer(
-                          transformationController: _transformationController,
-                          minScale: 0.5,
-                          maxScale: 4.0,
-                          child: AnimatedBuilder(
-                            animation: _animationController,
-                            builder: (context, child) {
-                              return CustomPaint(
-                                size: size,
-                                painter: RadarPainter(filteredAccessPoints, _animationController.value, isPaused: _isRotationPaused),
-                                child: Container(),
-                              );
-                            },
+                if (_isListVisible)
+                  Container(
+                    width: 200,
+                    decoration: BoxDecoration(border: Border(right: BorderSide(color: Colors.grey[800]!))),
+                    child: ListView.builder(
+                      itemCount: _listedDevices.length,
+                      itemBuilder: (context, index) {
+                        final bssid = _listedDevices.keys.elementAt(index);
+                        final ap = _listedDevices[bssid]!;
+                        final discoveryTime = _firstSeenTimestamps[bssid]!;
+                        final color = _getDeviceColor(discoveryTime);
+                        String label = ap.ssid.isNotEmpty ? ap.ssid : ap.bssid;
+                        return InkWell(
+                          onTap: () {
+                            Navigator.of(context).push(MaterialPageRoute(
+                              builder: (context) => SignalLocatorPage(accessPoint: ap),
+                            ));
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+                            child: Text(
+                              label,
+                              style: TextStyle(color: color),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                Expanded(
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('Filter by Signal Strength: ${_sensitivityValue.toInt()} dBm'),
-                      Slider(
-                        value: _sensitivityValue,
-                        min: -100,
-                        max: -30,
-                        divisions: 70,
-                        label: '${_sensitivityValue.toInt()} dBm',
-                        onChanged: (value) {
-                          setState(() {
-                            _sensitivityValue = value;
-                          });
-                        },
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final size = Size(constraints.maxWidth, constraints.maxHeight);
+                            final filteredAccessPoints = _accessPoints.where((ap) => ap.level >= _sensitivityValue).toList();
+                            return GestureDetector(
+                              onTapUp: (details) {
+                                final sceneOffset = _transformationController.toScene(details.localPosition);
+                                _handleTap(sceneOffset, size, filteredAccessPoints);
+                              },
+                              child: InteractiveViewer(
+                                transformationController: _transformationController,
+                                minScale: 0.5,
+                                maxScale: 4.0,
+                                child: AnimatedBuilder(
+                                  animation: _animationController,
+                                  builder: (context, child) {
+                                    return CustomPaint(
+                                      size: size,
+                                      painter: RadarPainter(filteredAccessPoints, _animationController.value, isPaused: _isRotationPaused),
+                                      child: Container(),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Filter by Signal Strength: ${_sensitivityValue.toInt()} dBm'),
+                            Slider(
+                              value: _sensitivityValue,
+                              min: -100,
+                              max: -30,
+                              divisions: 70,
+                              label: '${_sensitivityValue.toInt()} dBm',
+                              onChanged: (value) {
+                                setState(() {
+                                  _sensitivityValue = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      )
                     ],
                   ),
-                )
+                ),
               ],
             ),
     );
@@ -543,5 +650,44 @@ class SignalLocatorPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant SignalLocatorPainter oldDelegate) {
     return oldDelegate.level != level;
+  }
+}
+
+class AboutPage extends StatelessWidget {
+  const AboutPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('About'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'WiFi Scanner',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 24),
+            const Text('Released under a GPL-3.0 licence:'),
+            const SizedBox(height: 8),
+            const SelectableText(
+              'https://github.com/tmavroidis/wifiscanner?tab=GPL-3.0-1-ov-file#',
+              style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+            ),
+            const SizedBox(height: 24),
+            const Text('Source available at:'),
+            const SizedBox(height: 8),
+            const SelectableText(
+              'https://github.com/tmavroidis/wifiscanner/tree/master',
+              style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
