@@ -102,6 +102,7 @@ class MyApp extends StatelessWidget {
       ),
       darkTheme: ThemeData.dark(),
       themeMode: ThemeMode.dark,
+      debugShowCheckedModeBanner: false,
       home: const WiFiScannerPage(),
     );
   }
@@ -122,7 +123,7 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
   double _sensitivityValue = -100.0;
   bool _isRotationPaused = false;
   bool _isUnsupportedPlatform = false;
-  bool _isListVisible = true;
+  bool _isListVisible = false;
 
   // State for the new device list
   final Map<String, WiFiAccessPoint> _listedDevices = {};
@@ -147,6 +148,11 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
           setState(() {});
         }
       });
+    } else if (kIsWeb) {
+      _animationController = AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 5),
+      )..repeat();
     } else {
       _isUnsupportedPlatform = true;
       _animationController = AnimationController(
@@ -301,41 +307,44 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
       appBar: AppBar(
         title: const Text('WiFi Scanner'),
         actions: [
+          if (!_isUnsupportedPlatform)
+            Row(
+              children: [
+                const Text("Scan"),
+                Switch(
+                  value: !_isRotationPaused,
+                  onChanged: (value) {
+                    setState(() {
+                      _isRotationPaused = !value;
+                      if (_isRotationPaused) {
+                        _animationController.stop();
+                      } else {
+                        _animationController.repeat();
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(width: 8),
+                const Text("List"),
+                Switch(
+                  value: _isListVisible,
+                  onChanged: (value) {
+                    setState(() {
+                      _isListVisible = value;
+                    });
+                  },
+                ),
+              ],
+            ),
           PopupMenuButton<String>(
-            onSelected: (value) async {
+            onSelected: (value) {
               if (value == 'about') {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (context) => const AboutPage(),
                 ));
-              } else if (value == 'settings') {
-                final settings = await Navigator.of(context).push<Map<String, bool>>(
-                  MaterialPageRoute(
-                    builder: (context) => SettingsPage(
-                      isScanPaused: _isRotationPaused,
-                      isListVisible: _isListVisible,
-                    ),
-                  ),
-                );
-
-                if (settings != null) {
-                  setState(() {
-                    _isRotationPaused = settings['isScanPaused'] ?? _isRotationPaused;
-                    _isListVisible = settings['isListVisible'] ?? _isListVisible;
-
-                    if (_isRotationPaused) {
-                      _animationController.stop();
-                    } else {
-                      _animationController.repeat();
-                    }
-                  });
-                }
               }
             },
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-              const PopupMenuItem<String>(
-                value: 'settings',
-                child: Text('Settings'),
-              ),
               const PopupMenuItem<String>(
                 value: 'about',
                 child: Text('About'),
@@ -445,81 +454,6 @@ class _WiFiScannerPageState extends State<WiFiScannerPage> with SingleTickerProv
                 ),
               ],
             ),
-    );
-  }
-}
-
-class SettingsPage extends StatefulWidget {
-  final bool isScanPaused;
-  final bool isListVisible;
-
-  const SettingsPage({super.key, required this.isScanPaused, required this.isListVisible});
-
-  @override
-  State<SettingsPage> createState() => _SettingsPageState();
-}
-
-class _SettingsPageState extends State<SettingsPage> {
-  late bool _isScanPaused;
-  late bool _isListVisible;
-
-  @override
-  void initState() {
-    super.initState();
-    _isScanPaused = widget.isScanPaused;
-    _isListVisible = widget.isListVisible;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        leading: BackButton(
-          onPressed: () {
-            Navigator.of(context).pop({
-              'isScanPaused': _isScanPaused,
-              'isListVisible': _isListVisible,
-            });
-          },
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Pause Scan'),
-                Switch(
-                  value: _isScanPaused,
-                  onChanged: (value) {
-                    setState(() {
-                      _isScanPaused = value;
-                    });
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Show List'),
-                Switch(
-                  value: _isListVisible,
-                  onChanged: (value) {
-                    setState(() {
-                      _isListVisible = value;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
